@@ -1,0 +1,79 @@
+name: API tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["tests/**", "resources/**", "variables/**", "config/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Run tests (no AI in this step)
+        shell: bash
+        run: |
+          mkdir -p results
+          VERSION=$(cat config/api_version.txt)
+          echo "API version under test: $VERSION"
+          robot --outputdir results \
+            --variable BASE_URL:https://api.frankfurter.dev/$VERSION \
+            tests | tee results/console.txt
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## API tests against $(cat config/api_version.txt)"
+            echo
+            echo '```'
+            grep -E "tests, .* passed" results/console.txt | tail -1
+            echo '```'
+            echo "**AI cost of this run: \$0.00** (plain Robot Framework code, no AI call)"
+            echo
+            echo "### AI cost ledger"
+            echo
+            echo '```'
+            column -s, -t ledger.csv
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Prepare the report page
+        if: always()
+        run: |
+          mkdir -p site
+          cp results/log.html site/index.html
+          cp results/report.html site/report.html
+      - name: Upload the report page
+        if: always() && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: Keep the raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robot-report
+          path: results
+
+  publish:
+    needs: test
+    if: always() && github.ref == 'refs/heads/main' && needs.test.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
